@@ -1,10 +1,12 @@
 use crate::{
-    core::{advance, Airlock as _, Next},
+    core::{advance, advance_with_ctx, Airlock as _, Next},
     ext::MaybeUninitExt,
-    ops::{Coroutine, GeneratorState},
+    ops::{Coroutine, GeneratorState, Generator},
     stack::engine::{Airlock, Co},
 };
-use std::{future::Future, mem, pin::Pin, ptr};
+use std::{future::Future, mem, pin::Pin, ptr, task::{Context, Poll}};
+
+use futures_core::Stream;
 
 /// This data structure holds the transient state of an executing generator.
 ///
@@ -114,6 +116,7 @@ impl<'s, Y, R, F: Future> Gen<'s, Y, R, F> {
     ///
     /// _See the module-level docs for examples._
     pub fn resume_with(&mut self, arg: R) -> GeneratorState<Y, F::Output> {
+        println!("resume_with");
         unsafe {
             // Safety: `future` is pinned, but never moved. `airlock` is never pinned.
             let state = self.state.as_mut().get_unchecked_mut();
@@ -163,5 +166,59 @@ impl<'s, Y, R, F: Future> Coroutine for Gen<'s, Y, R, F> {
         // Safety: `Gen::resume_with` does not move `self`.
         let this = unsafe { self.get_unchecked_mut() };
         this.resume_with(arg)
+    }
+}
+
+// struct GenStream<G, T> {
+//     gen: G,
+//     _marker: std::marker::PhantomData<T>,
+// }
+
+// impl<G, T> Stream for GenStream<G, T>
+// where
+//     G: Generator<Yield=Poll<T>, Return=()> + Unpin,
+//     T: Unpin,
+// {
+
+//     type Item = T;
+
+//     fn poll_next(
+//         mut self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//     ) -> Poll<Option<Self::Item>> {
+//         println!("POLL NEXT");
+//         let this = self.get_mut();
+//         match advance_with_ctx(|| {}, ) {
+
+//         }
+
+//     }
+// }
+
+impl<'s, Y, R, F: Future> Stream for Gen<'s, Y, R, F> {
+
+    // type Item = F::Output;
+    type Item = Y;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        println!("POLL NEXT");
+        unsafe {
+            let state = self.state.as_mut().get_unchecked_mut();
+            let future = Pin::new_unchecked(&mut state.future);
+            let airlock = &state.airlock;
+            println!("context {:?}", cx);
+            match advance_with_ctx(future, &airlock, cx) {
+                GeneratorState::Yielded(x) => {
+                    println!("yielded");
+                    Poll::Ready(Some(x))
+                },
+                GeneratorState::Complete(value) => {
+                    Poll::Ready(None)
+                },
+            }
+        }
     }
 }

@@ -15,7 +15,10 @@ categories = ["asynchronous", "concurrency", "rust-patterns"]
 include = ["Cargo.toml", "README-crates-io.md", "src/**/*.rs"]
 
 [dependencies]
+futures-core = "0.3"
+futures = "0.3"
 
 [features]
 nightly = []
 strict = []
+stream = []
