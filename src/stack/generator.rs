@@ -1,10 +1,18 @@
 use crate::{
-    core::{advance, Airlock as _, Next},
+    core::{advance, advance_with_ctx, Airlock as Lock, Next},
     ext::MaybeUninitExt,
     ops::{Coroutine, GeneratorState},
     stack::engine::{Airlock, Co},
 };
-use std::{future::Future, mem, pin::Pin, ptr};
+use std::{
+    future::Future,
+    mem,
+    pin::Pin,
+    ptr,
+    task::{Context, Poll},
+};
+
+use futures_core::Stream;
 
 /// This data structure holds the transient state of an executing generator.
 ///
@@ -114,7 +122,6 @@ impl<'s, Y, R, F: Future> Gen<'s, Y, R, F> {
     ///
     /// _See the module-level docs for examples._
     pub fn resume_with(&mut self, arg: R) -> GeneratorState<Y, F::Output> {
-        println!("resume_with");
         unsafe {
             // Safety: `future` is pinned, but never moved. `airlock` is never pinned.
             let state = self.state.as_mut().get_unchecked_mut();
@@ -127,12 +134,11 @@ impl<'s, Y, R, F: Future> Gen<'s, Y, R, F> {
         }
     }
 
-    pub fn resume_with_pass_ctx(
+    fn resume_with_pass_ctx(
         &mut self,
         arg: R,
         cx: &mut Context<'_>,
     ) -> GeneratorState<Y, F::Output> {
-        println!("resume_with_ctx");
         unsafe {
             // Safety: `future` is pinned, but never moved. `airlock` is never pinned.
             let state = self.state.as_mut().get_unchecked_mut();
@@ -185,165 +191,31 @@ impl<'s, Y, R, F: Future> Coroutine for Gen<'s, Y, R, F> {
     }
 }
 
-use futures_core::Stream;
-use std::{task::{Context, Poll}};
-
-pub struct StreamGen<'s, Y, F: Future<Output = ()>> {
+pub struct StreamGen<'s, Y, F: Future> {
     generator: Gen<'s, Y, (), F>,
 }
 
-impl<'s, Y, F: Future<Output = ()>> Stream for StreamGen<'s, Y, F> {
+impl<'s, Y, F: Future> StreamGen<'s, Y, F> {
+    pub fn new(generator: Gen<'s, Y, (), F>) -> Self {
+        StreamGen { generator }
+    }
+}
+
+impl<'s, Y, F: Future> Stream for StreamGen<'s, Y, F> {
     type Item = Y;
 
     fn poll_next(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        println!("POLL NEXT");
-        //let this = self.get_mut();
-
-        match self.get_mut().generator.resume_with_pass_ctx((), cx) {
+        let this = self.get_mut();
+        match this.generator.resume_with_pass_ctx((), cx) {
             GeneratorState::Yielded(x) => {
-                println!("Yielded");
-                match self.get_mut().generator.state.airlock.peek() {
-                    Next::Resume(arg) => {
-                        println!("next next resume {:?}", cx);
-                        Poll::Ready(Some(x))
-                    }
-                    Next::Empty | Next::Yield(_) | Next::Completed => {
-                        unreachable!("resume then Next::Empty")
-                    }
-                }
+                Poll::Ready(Some(x))
             }
-            GeneratorState::Complete(f) => {
-                println!("Completed");
+            GeneratorState::Complete(_f) => {
                 Poll::Ready(None)
             }
         }
     }
 }
-
-// struct GenStream<G, A, T>
-// where
-//     A: Lock,
-// {
-//     gen: G,
-//     airlock: A,
-//     _marker: std::marker::PhantomData<T>,
-// }
-
-// impl<G: crate::ops::Generator, A, T> Stream for GenStream<G, A, T>
-// where
-//     A: Lock,
-// {
-//     type Item = T;
-
-//     fn poll_next(
-//         mut self: Pin<&mut Self>,
-//         cx: &mut Context<'_>,
-//     ) -> Poll<Option<Self::Item>> {
-//         println!("POLL NEXT");
-//         //let this = self.get_mut();
-
-//         match self.gen.resume_with_pass_ctx((), cx) {
-//             GeneratorState::Yielded(x) => {
-//                 println!("Yielded");
-//                 match self.airlock.peek() {
-//                     Next::Resume(arg) => {
-//                         println!("next next resume {:?}", cx);
-//                         Poll::Ready(Some(x))
-//                     }
-//                     Next::Empty | Next::Yield(_) | Next::Completed => {
-//                         unreachable!("resume then Next::Empty")
-//                     }
-//                 }
-//             }
-//             GeneratorState::Complete(f) => {
-//                 println!("Completed");
-//                 Poll::Ready(None)
-//             }
-//         }
-//     }
-// }
-
-// impl<'s, Y, R, F: Future> Stream for Gen<'s, Y, R, F> {
-
-//     // type Item = F::Output;
-//     type Item = Y;
-
-//     fn poll_next(
-//         mut self: Pin<&mut Self>,
-//         cx: &mut Context<'_>,
-//     ) -> Poll<Option<Self::Item>> {
-
-//         println!("POLL NEXT");
-//         unsafe {
-//             let this = self.get_mut();
-//             let state = this.state.as_mut().get_unchecked_mut();
-//             let arg = state.make_R(() as R);
-//             let future = Pin::new_unchecked(&mut state.future);
-//             let airlock = &state.airlock;
-
-//             match this.resume_with_ctx((), cx) {
-//                 GeneratorState::Yielded(x) => {
-//                     println!("Yielded");
-//                     match airlock.peek() {
-//                         Next::Resume(arg) => {
-//                             println!("next next resume {:?}", cx);
-//                             Poll::Ready(Some(x))
-//                         },
-//                         Next::Empty | Next::Yield(_) | Next::Completed =>
-// unreachable!("resume then Next::Empty"),                     }
-//                 },
-//                 GeneratorState::Complete(f) => {
-//                     println!("Completed");
-//                     Poll::Ready(None)
-//                 }
-//             }
-//         }
-
-//         // let (future, airlock) = unsafe {
-//         //     let this = self.get_mut();
-//         //     this.resume_with_ctx(cx);
-//         //     let state = this.state.as_mut().get_unchecked_mut();
-//         //     let future = Pin::new_unchecked(&mut state.future);
-//         //     let airlock = &state.airlock;
-//         //     (future, airlock)
-//         // };
-//         // match airlock.peek() {
-//         //     Next::Yield(_) => {
-//         //         println!("next yield");
-//         //         Poll::Pending
-//         //     },
-//         //     Next::Resume(x) => {
-//         //         println!("next resume {:?}", x);
-//         //         let next = airlock.replace(Next::Empty);
-//         //         match next {
-//         //             Next::Resume(arg) => {
-//         //                 println!("next next resume {:?}", cx);
-//         //                 Poll::Ready(Some(()))
-//         //             },
-//         //             Next::Empty | Next::Yield(_) | Next::Completed =>
-// unreachable!("resume then Next::Empty {:?}", x),         //         }
-//         //     }
-//         //     Next::Empty | Next::Completed => unreachable!("Next::Empty or
-// Next::Completed"),         // }
-
-//         // unsafe {
-//         //     let state = self.state.as_mut().get_unchecked_mut();
-//         //     let future = Pin::new_unchecked(&mut state.future);
-//         //     let airlock = &state.airlock;
-//         //     println!("context {:?}", cx);
-//         //     match advance_with_ctx(future, &airlock, cx) {
-//         //         GeneratorState::Yielded(x) => {
-//         //             println!("yielded");
-//         //             self.get_mut().resume();
-//         //             Poll::Ready(Some(x))
-//         //         },
-//         //         GeneratorState::Complete(value) => {
-//         //             Poll::Ready(None)
-//         //         },
-//         //     }
-//         // }
-//     }
-// }

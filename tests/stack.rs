@@ -5,17 +5,16 @@
 
 use genawaiter::{
     generator_mut,
-    stack::{Co, Gen, Shelf},
+    stack::{self, Co, Gen, Shelf},
 };
 
 use futures::{
-    executor::{block_on, block_on_stream},
-    stream::{Stream, StreamExt},
+    executor::{block_on},
+    stream::{StreamExt},
 };
 
 async fn odd_numbers_less_than_ten(co: Co<'_, i32>) {
     for n in (1..).step_by(2).take_while(|&n| n < 10) {
-        println!("back to stack frame");
         co.yield_(n).await;
     }
 }
@@ -34,22 +33,24 @@ fn test_basic_stack() {
 }
 
 #[test]
+#[allow(unused_mut)]
 fn test_basic_stream() {
-    generator_mut!(gen, odd_numbers_less_than_ten);
-    let mut x = gen.take(3);
+    let cmp = &[1_i32, 3, 5, 7, 9];
+
+    let mut generator_state = stack::Shelf::new();
+    let mut generator = unsafe {
+        stack::Gen::new(&mut generator_state, odd_numbers_less_than_ten)
+    };
+    let gen = &mut stack::StreamGen::new(generator);
+
     block_on(async {
-        println!("{:?}", x.next().await);
-        println!("{:?}", x.next().await);
+        for x in cmp.iter() {
+            let y = gen.next().await.unwrap();
+            println!("{}=={}", x, y);
+            assert_eq!(*x, y)
+        }
     });
-    // block_on(async { println!("{:?}", gen.next().await) });
 
-    // gen.take(3);
-
-    // gen.for_each(|x| println!("{:?}", x));
-
-    // block_on_stream(s);
-
-    // assert_eq!(xs, [1, 3, 5, 7, 9]);
 }
 
 #[test]

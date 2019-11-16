@@ -59,6 +59,39 @@ pub fn advance<Y, R, F: Future>(
     }
 }
 
+pub fn advance_with_ctx<Y, R, F: Future>(
+    future: Pin<&mut F>,
+    airlock: &impl Airlock<Yield = Y, Resume = R>,
+    mut cx: &mut Context<'_>,
+) -> GeneratorState<Y, F::Output> {
+    match future.poll(&mut cx) {
+        Poll::Pending => {
+            let value = airlock.replace(Next::Empty);
+            match value {
+                Next::Empty | Next::Completed => unreachable!(),
+                Next::Yield(y) => GeneratorState::Yielded(y),
+                Next::Resume(_) => {
+                    #[cfg(debug_assertions)]
+                    panic!(
+                        "A generator was awaited without first yielding a value. \
+                         Inside a generator, do not await any futures other than the \
+                         one returned by `Co::yield_`.",
+                    );
+
+                    #[cfg(not(debug_assertions))]
+                    panic!("invalid await");
+                }
+            }
+        }
+        Poll::Ready(value) => {
+            #[cfg(debug_assertions)]
+            airlock.replace(Next::Completed);
+
+            GeneratorState::Complete(value)
+        }
+    }
+}
+
 pub trait Airlock {
     type Yield;
     type Resume;
@@ -119,11 +152,15 @@ impl<'a, A: Airlock> Future for Barrier<'a, A> {
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.airlock.peek() {
-            Next::Yield(_) => Poll::Pending,
+            Next::Yield(_) => {
+                Poll::Pending
+            }
             Next::Resume(_) => {
                 let next = self.airlock.replace(Next::Empty);
                 match next {
-                    Next::Resume(arg) => Poll::Ready(arg),
+                    Next::Resume(arg) => {
+                        Poll::Ready(arg)
+                    }
                     Next::Empty | Next::Yield(_) | Next::Completed => unreachable!(),
                 }
             }

@@ -173,7 +173,7 @@ assert_eq!(gen.resume(), GeneratorState::Complete("done!"));
 */
 
 pub use engine::Co;
-pub use generator::{Gen, Shelf};
+pub use generator::{Gen, Shelf, StreamGen};
 
 #[macro_use]
 mod macros;

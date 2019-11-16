@@ -35,6 +35,33 @@ impl<'s, Y, R> core::Airlock for &'s Airlock<Y, R> {
     }
 }
 
+impl<Y, R> core::Airlock for Airlock<Y, R> {
+    type Yield = Y;
+    type Resume = R;
+
+    fn peek(&self) -> Next<(), ()> {
+        // Safety: This follows the safety rules above.
+        let inner = unsafe { &*self.0.get() };
+        inner.without_values()
+    }
+
+    fn replace(
+        &self,
+        next: Next<Self::Yield, Self::Resume>,
+    ) -> Next<Self::Yield, Self::Resume> {
+        // Safety: This follows the safety rules above.
+        unsafe { ptr::replace(self.0.get(), next) }
+    }
+}
+pub trait GenLock<Y> {
+    fn as_gen_lock(&self) -> &dyn core::Airlock<Yield = Y, Resume = ()>;
+}
+impl<Y> GenLock<Y> for Airlock<Y, ()> {
+    fn as_gen_lock(&self) -> &dyn core::Airlock<Yield = Y, Resume = ()> {
+        self as &dyn core::Airlock<Yield = Y, Resume = ()>
+    }
+}
+
 /// This object lets you yield values from the generator by calling the `yield_`
 /// method.
 ///
