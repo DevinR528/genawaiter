@@ -114,6 +114,7 @@ impl<'s, Y, R, F: Future> Gen<'s, Y, R, F> {
     ///
     /// _See the module-level docs for examples._
     pub fn resume_with(&mut self, arg: R) -> GeneratorState<Y, F::Output> {
+        println!("resume_with");
         unsafe {
             // Safety: `future` is pinned, but never moved. `airlock` is never pinned.
             let state = self.state.as_mut().get_unchecked_mut();
@@ -123,6 +124,24 @@ impl<'s, Y, R, F: Future> Gen<'s, Y, R, F> {
             let future = Pin::new_unchecked(&mut state.future);
             let airlock = &state.airlock;
             advance(future, &airlock)
+        }
+    }
+
+    pub fn resume_with_pass_ctx(
+        &mut self,
+        arg: R,
+        cx: &mut Context<'_>,
+    ) -> GeneratorState<Y, F::Output> {
+        println!("resume_with_ctx");
+        unsafe {
+            // Safety: `future` is pinned, but never moved. `airlock` is never pinned.
+            let state = self.state.as_mut().get_unchecked_mut();
+
+            (&state.airlock).replace(Next::Resume(arg));
+
+            let future = Pin::new_unchecked(&mut state.future);
+            let airlock = &state.airlock;
+            advance_with_ctx(future, &airlock, cx)
         }
     }
 }
