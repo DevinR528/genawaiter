@@ -165,3 +165,21 @@ impl<'s, Y, R, F: Future> Coroutine for Gen<'s, Y, R, F> {
         this.resume_with(arg)
     }
 }
+
+use futures_core::Stream;
+use std::{};
+
+pub struct StreamGen<'s, Y, F: Future<Output = ()>> {
+    generator: Gen<'s, Y, (), F>,
+}
+
+impl<'s, Y, F: Future<Output = ()>> Stream for IntoIter<'s, Y, F> {
+    type Item = Y;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.generator.resume() {
+            GeneratorState::Yielded(x) => Some(x),
+            GeneratorState::Complete(()) => None,
+        }
+    }
+}
