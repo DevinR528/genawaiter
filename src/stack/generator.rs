@@ -167,19 +167,164 @@ impl<'s, Y, R, F: Future> Coroutine for Gen<'s, Y, R, F> {
 }
 
 use futures_core::Stream;
-use std::{};
+use std::{task::{Context, Poll}};
 
 pub struct StreamGen<'s, Y, F: Future<Output = ()>> {
     generator: Gen<'s, Y, (), F>,
 }
 
-impl<'s, Y, F: Future<Output = ()>> Stream for IntoIter<'s, Y, F> {
+impl<'s, Y, F: Future<Output = ()>> Stream for StreamGen<'s, Y, F> {
     type Item = Y;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.generator.resume() {
-            GeneratorState::Yielded(x) => Some(x),
-            GeneratorState::Complete(()) => None,
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        println!("POLL NEXT");
+        //let this = self.get_mut();
+
+        match self.get_mut().generator.resume_with_pass_ctx((), cx) {
+            GeneratorState::Yielded(x) => {
+                println!("Yielded");
+                match self.get_mut().generator.state.airlock.peek() {
+                    Next::Resume(arg) => {
+                        println!("next next resume {:?}", cx);
+                        Poll::Ready(Some(x))
+                    }
+                    Next::Empty | Next::Yield(_) | Next::Completed => {
+                        unreachable!("resume then Next::Empty")
+                    }
+                }
+            }
+            GeneratorState::Complete(f) => {
+                println!("Completed");
+                Poll::Ready(None)
+            }
         }
     }
 }
+
+// struct GenStream<G, A, T>
+// where
+//     A: Lock,
+// {
+//     gen: G,
+//     airlock: A,
+//     _marker: std::marker::PhantomData<T>,
+// }
+
+// impl<G: crate::ops::Generator, A, T> Stream for GenStream<G, A, T>
+// where
+//     A: Lock,
+// {
+//     type Item = T;
+
+//     fn poll_next(
+//         mut self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//     ) -> Poll<Option<Self::Item>> {
+//         println!("POLL NEXT");
+//         //let this = self.get_mut();
+
+//         match self.gen.resume_with_pass_ctx((), cx) {
+//             GeneratorState::Yielded(x) => {
+//                 println!("Yielded");
+//                 match self.airlock.peek() {
+//                     Next::Resume(arg) => {
+//                         println!("next next resume {:?}", cx);
+//                         Poll::Ready(Some(x))
+//                     }
+//                     Next::Empty | Next::Yield(_) | Next::Completed => {
+//                         unreachable!("resume then Next::Empty")
+//                     }
+//                 }
+//             }
+//             GeneratorState::Complete(f) => {
+//                 println!("Completed");
+//                 Poll::Ready(None)
+//             }
+//         }
+//     }
+// }
+
+// impl<'s, Y, R, F: Future> Stream for Gen<'s, Y, R, F> {
+
+//     // type Item = F::Output;
+//     type Item = Y;
+
+//     fn poll_next(
+//         mut self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//     ) -> Poll<Option<Self::Item>> {
+
+//         println!("POLL NEXT");
+//         unsafe {
+//             let this = self.get_mut();
+//             let state = this.state.as_mut().get_unchecked_mut();
+//             let arg = state.make_R(() as R);
+//             let future = Pin::new_unchecked(&mut state.future);
+//             let airlock = &state.airlock;
+
+//             match this.resume_with_ctx((), cx) {
+//                 GeneratorState::Yielded(x) => {
+//                     println!("Yielded");
+//                     match airlock.peek() {
+//                         Next::Resume(arg) => {
+//                             println!("next next resume {:?}", cx);
+//                             Poll::Ready(Some(x))
+//                         },
+//                         Next::Empty | Next::Yield(_) | Next::Completed =>
+// unreachable!("resume then Next::Empty"),                     }
+//                 },
+//                 GeneratorState::Complete(f) => {
+//                     println!("Completed");
+//                     Poll::Ready(None)
+//                 }
+//             }
+//         }
+
+//         // let (future, airlock) = unsafe {
+//         //     let this = self.get_mut();
+//         //     this.resume_with_ctx(cx);
+//         //     let state = this.state.as_mut().get_unchecked_mut();
+//         //     let future = Pin::new_unchecked(&mut state.future);
+//         //     let airlock = &state.airlock;
+//         //     (future, airlock)
+//         // };
+//         // match airlock.peek() {
+//         //     Next::Yield(_) => {
+//         //         println!("next yield");
+//         //         Poll::Pending
+//         //     },
+//         //     Next::Resume(x) => {
+//         //         println!("next resume {:?}", x);
+//         //         let next = airlock.replace(Next::Empty);
+//         //         match next {
+//         //             Next::Resume(arg) => {
+//         //                 println!("next next resume {:?}", cx);
+//         //                 Poll::Ready(Some(()))
+//         //             },
+//         //             Next::Empty | Next::Yield(_) | Next::Completed =>
+// unreachable!("resume then Next::Empty {:?}", x),         //         }
+//         //     }
+//         //     Next::Empty | Next::Completed => unreachable!("Next::Empty or
+// Next::Completed"),         // }
+
+//         // unsafe {
+//         //     let state = self.state.as_mut().get_unchecked_mut();
+//         //     let future = Pin::new_unchecked(&mut state.future);
+//         //     let airlock = &state.airlock;
+//         //     println!("context {:?}", cx);
+//         //     match advance_with_ctx(future, &airlock, cx) {
+//         //         GeneratorState::Yielded(x) => {
+//         //             println!("yielded");
+//         //             self.get_mut().resume();
+//         //             Poll::Ready(Some(x))
+//         //         },
+//         //         GeneratorState::Complete(value) => {
+//         //             Poll::Ready(None)
+//         //         },
+//         //     }
+//         // }
+//     }
+// }
